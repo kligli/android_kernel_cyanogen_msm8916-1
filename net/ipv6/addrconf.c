@@ -181,6 +181,8 @@ static struct ipv6_devconf ipv6_devconf __read_mostly = {
 	.accept_redirects	= 1,
 	.autoconf		= 1,
 	.force_mld_version	= 0,
+	.mldv1_unsolicited_report_interval = 10 * HZ,
+	.mldv2_unsolicited_report_interval = HZ,
 	.dad_transmits		= 1,
 	.rtr_solicits		= MAX_RTR_SOLICITATIONS,
 	.rtr_solicit_interval	= RTR_SOLICITATION_INTERVAL,
@@ -219,6 +221,9 @@ static struct ipv6_devconf ipv6_devconf_dflt __read_mostly = {
 	.accept_ra		= 1,
 	.accept_redirects	= 1,
 	.autoconf		= 1,
+	.force_mld_version	= 0,
+	.mldv1_unsolicited_report_interval = 10 * HZ,
+	.mldv2_unsolicited_report_interval = HZ,
 	.dad_transmits		= 1,
 	.rtr_solicits		= MAX_RTR_SOLICITATIONS,
 	.rtr_solicit_interval	= RTR_SOLICITATION_INTERVAL,
@@ -4355,6 +4360,10 @@ static inline void ipv6_store_devconf(struct ipv6_devconf *cnf,
 	array[DEVCONF_RTR_SOLICIT_DELAY] =
 		jiffies_to_msecs(cnf->rtr_solicit_delay);
 	array[DEVCONF_FORCE_MLD_VERSION] = cnf->force_mld_version;
+	array[DEVCONF_MLDV1_UNSOLICITED_REPORT_INTERVAL] =
+		jiffies_to_msecs(cnf->mldv1_unsolicited_report_interval);
+	array[DEVCONF_MLDV2_UNSOLICITED_REPORT_INTERVAL] =
+		jiffies_to_msecs(cnf->mldv2_unsolicited_report_interval);
 #ifdef CONFIG_IPV6_PRIVACY
 	array[DEVCONF_USE_TEMPADDR] = cnf->use_tempaddr;
 	array[DEVCONF_TEMP_VALID_LFT] = cnf->temp_valid_lft;
@@ -4873,8 +4882,7 @@ static void addrconf_disable_change(struct net *net, __s32 newf)
 	struct net_device *dev;
 	struct inet6_dev *idev;
 
-	rcu_read_lock();
-	for_each_netdev_rcu(net, dev) {
+	for_each_netdev(net, dev) {
 		idev = __in6_dev_get(dev);
 		if (idev) {
 			int changed = (!idev->cnf.disable_ipv6) ^ (!newf);
@@ -4883,7 +4891,6 @@ static void addrconf_disable_change(struct net *net, __s32 newf)
 				dev_disable_change(idev);
 		}
 	}
-	rcu_read_unlock();
 }
 
 static int addrconf_disable_ipv6(struct ctl_table *table, int *p, int newf)
@@ -5022,6 +5029,22 @@ static struct addrconf_sysctl_table
 			.maxlen		= sizeof(int),
 			.mode		= 0644,
 			.proc_handler	= proc_dointvec,
+		},
+		{
+			.procname	= "mldv1_unsolicited_report_interval",
+			.data		=
+				&ipv6_devconf.mldv1_unsolicited_report_interval,
+			.maxlen		= sizeof(int),
+			.mode		= 0644,
+			.proc_handler	= proc_dointvec_ms_jiffies,
+		},
+		{
+			.procname	= "mldv2_unsolicited_report_interval",
+			.data		=
+				&ipv6_devconf.mldv2_unsolicited_report_interval,
+			.maxlen		= sizeof(int),
+			.mode		= 0644,
+			.proc_handler	= proc_dointvec_ms_jiffies,
 		},
 #ifdef CONFIG_IPV6_PRIVACY
 		{

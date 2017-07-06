@@ -1580,7 +1580,7 @@ static int msm_cpp_cfg_frame(struct cpp_device *cpp_dev,
 	unsigned long tnr_scratch_buffer0, tnr_scratch_buffer1;
 	uint16_t num_stripes = 0;
 	struct msm_buf_mngr_info buff_mgr_info, dup_buff_mgr_info;
-	int32_t stripe_base = 0;
+	uint32_t stripe_base = 0;
 	int32_t in_fd;
 	int32_t i = 0;
 
@@ -1599,6 +1599,13 @@ static int msm_cpp_cfg_frame(struct cpp_device *cpp_dev,
 
 	if (cpp_frame_msg[new_frame->msg_len - 1] != MSM_CPP_MSG_ID_TRAILER) {
 		pr_err("%s %d Invalid frame message\n", __func__, __LINE__);
+		return -EINVAL;
+	}
+
+	if (stripe_base == UINT_MAX || new_frame->num_strips >
+		(UINT_MAX - 1 - stripe_base) / 27) {
+		pr_err("Invalid frame message,num_strips %d is large\n",
+			new_frame->num_strips);
 		return -EINVAL;
 	}
 
@@ -1891,16 +1898,48 @@ static int msm_cpp_copy_from_ioctl_ptr(void *dst_ptr,
 }
 #endif
 
+static int msm_cpp_validate_ioctl_input(unsigned int cmd, void *arg,
+	struct msm_camera_v4l2_ioctl_t **ioctl_ptr)
+{
+	switch (cmd) {
+	case MSM_SD_SHUTDOWN:
+	case MSM_SD_NOTIFY_FREEZE:
+	case VIDIOC_MSM_CPP_IOMMU_ATTACH:
+	case VIDIOC_MSM_CPP_IOMMU_DETACH:
+		break;
+	default:
+		if (ioctl_ptr == NULL) {
+			pr_err("Wrong ioctl_ptr for cmd %u\n", cmd);
+			return -EINVAL;
+		}
+
+		*ioctl_ptr = arg;
+		if (((*ioctl_ptr) == NULL) ||
+			((*ioctl_ptr)->ioctl_ptr == NULL) ||
+			((*ioctl_ptr)->len == 0)) {
+			pr_err("Error invalid ioctl argument cmd %u", cmd);
+			return -EINVAL;
+		}
+		break;
+	}
+	return 0;
+}
+
 long msm_cpp_subdev_ioctl(struct v4l2_subdev *sd,
 			unsigned int cmd, void *arg)
 {
 	struct cpp_device *cpp_dev = NULL;
-	struct msm_camera_v4l2_ioctl_t *ioctl_ptr = arg;
+	struct msm_camera_v4l2_ioctl_t *ioctl_ptr = NULL;
 	int rc = 0;
 
-	if ((sd == NULL) || (ioctl_ptr == NULL)) {
-		pr_err("Wrong ioctl_ptr %p, sd %p\n", ioctl_ptr, sd);
+	if (sd == NULL) {
+		pr_err("sd %pK\n", sd);
 		return -EINVAL;
+	}
+	rc = msm_cpp_validate_ioctl_input(cmd, arg, &ioctl_ptr);
+	if (rc != 0) {
+		pr_err("input validation failed\n");
+		return rc;
 	}
 
 	if (_IOC_DIR(cmd) == _IOC_NONE) {
@@ -2315,6 +2354,7 @@ long msm_cpp_subdev_ioctl(struct v4l2_subdev *sd,
 				pr_err("%s:%dError iommu_attach_device failed\n",
 					__func__, __LINE__);
 				rc = -EINVAL;
+				break;
 			}
 			cpp_dev->iommu_state = CPP_IOMMU_STATE_ATTACHED;
 		} else {
@@ -2331,8 +2371,9 @@ long msm_cpp_subdev_ioctl(struct v4l2_subdev *sd,
 				cpp_dev->iommu_ctx);
 			cpp_dev->iommu_state = CPP_IOMMU_STATE_DETACHED;
 		} else {
-			pr_err("%s:%d IOMMMU attach triggered in invalid state\n",
+			pr_err("%s:%d IOMMMU detach triggered in invalid state\n",
 				__func__, __LINE__);
+			rc = -EINVAL;
 		}
 		break;
 	}
@@ -2588,6 +2629,7 @@ static long msm_cpp_subdev_fops_compat_ioctl(struct file *file,
 	struct msm_cpp_frame_info32_t k32_frame_info;
 	struct msm_cpp_frame_info_t k64_frame_info;
 	void __user *up = (void __user *)arg;
+	bool is_copytouser_req = true;
 
 	if (sd == NULL) {
 		pr_err("%s: Subdevice is NULL\n", __func__);
@@ -2727,6 +2769,7 @@ static long msm_cpp_subdev_fops_compat_ioctl(struct file *file,
 				kp_ioctl.len =
 				  sizeof(struct msm_cpp_stream_buff_info_t);
 		}
+		is_copytouser_req = false;
 		if (cmd == VIDIOC_MSM_CPP_ENQUEUE_STREAM_BUFF_INFO32)
 			cmd = VIDIOC_MSM_CPP_ENQUEUE_STREAM_BUFF_INFO;
 		else
@@ -2790,6 +2833,7 @@ static long msm_cpp_subdev_fops_compat_ioctl(struct file *file,
 				kp_ioctl.len =
 					sizeof(struct msm_cpp_clock_settings_t);
 		}
+		is_copytouser_req = false;
 		cmd = VIDIOC_MSM_CPP_SET_CLOCK;
 		break;
 	}
@@ -2814,6 +2858,7 @@ static long msm_cpp_subdev_fops_compat_ioctl(struct file *file,
 
 		kp_ioctl.ioctl_ptr = (void *)&k_queue_buf;
 		kp_ioctl.len = sizeof(struct msm_pproc_queue_buf_info);
+		is_copytouser_req = false;
 		cmd = VIDIOC_MSM_CPP_QUEUE_BUF;
 		break;
 	}
@@ -2851,7 +2896,7 @@ static long msm_cpp_subdev_fops_compat_ioctl(struct file *file,
 	default:
 		pr_err_ratelimited("%s: unsupported compat type :%d\n",
 				__func__, cmd);
-		break;
+		return -EINVAL;
 	}
 
 	switch (cmd) {
@@ -2878,16 +2923,19 @@ static long msm_cpp_subdev_fops_compat_ioctl(struct file *file,
 	default:
 		pr_err_ratelimited("%s: unsupported compat type :%d\n",
 				__func__, cmd);
-		break;
+		return -EINVAL;
 	}
 
-	up32_ioctl.id = kp_ioctl.id;
-	up32_ioctl.len = kp_ioctl.len;
-	up32_ioctl.trans_code = kp_ioctl.trans_code;
-	up32_ioctl.ioctl_ptr = ptr_to_compat(kp_ioctl.ioctl_ptr);
+	if (is_copytouser_req) {
+		up32_ioctl.id = kp_ioctl.id;
+		up32_ioctl.len = kp_ioctl.len;
+		up32_ioctl.trans_code = kp_ioctl.trans_code;
+		up32_ioctl.ioctl_ptr = ptr_to_compat(kp_ioctl.ioctl_ptr);
 
-	if (copy_to_user((void __user *)up, &up32_ioctl, sizeof(up32_ioctl)))
-		return -EFAULT;
+		if (copy_to_user((void __user *)up, &up32_ioctl,
+			sizeof(up32_ioctl)))
+			return -EFAULT;
+	}
 
 	return rc;
 }

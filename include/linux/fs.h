@@ -252,6 +252,12 @@ struct iattr {
  */
 #include <linux/quota.h>
 
+/*
+ * Maximum number of layers of fs stack.  Needs to be limited to
+ * prevent kernel stack overflow
+ */
+#define FILESYSTEM_MAX_STACK_DEPTH 2
+
 /** 
  * enum positive_aop_returns - aop return codes with specific semantics
  *
@@ -1336,6 +1342,10 @@ struct super_block {
 
 	/* AIO completions deferred from interrupt context */
 	struct workqueue_struct *s_dio_done_wq;
+	/*
+	 * Indicates how deep in a filesystem stack this SB is
+	 */
+	int s_stack_depth;
 };
 
 /* superblock cache pruning functions */
@@ -1530,6 +1540,7 @@ typedef int (*filldir_t)(void *, const char *, int, loff_t, u64, unsigned);
 struct dir_context {
 	const filldir_t actor;
 	loff_t pos;
+	bool romnt;
 };
 
 static inline bool dir_emit(struct dir_context *ctx,

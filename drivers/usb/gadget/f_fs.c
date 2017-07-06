@@ -1422,14 +1422,14 @@ static void ffs_data_clear(struct ffs_data *ffs)
 {
 	ENTER();
 
-	pr_debug("%s: ffs->gadget= %p, ffs->flags= %lu\n", __func__,
+	pr_debug("%s: ffs->gadget= %pK, ffs->flags= %lu\n", __func__,
 						ffs->gadget, ffs->flags);
 	if (test_and_clear_bit(FFS_FL_CALL_CLOSED_CALLBACK, &ffs->flags))
 		functionfs_closed_callback(ffs);
 
 	/* Dump ffs->gadget and ffs->flags */
 	if (ffs->gadget)
-		pr_err("%s: ffs->gadget= %p, ffs->flags= %lu\n", __func__,
+		pr_err("%s: ffs->gadget= %pK, ffs->flags= %lu\n", __func__,
 						ffs->gadget, ffs->flags);
 	BUG_ON(ffs->gadget);
 
@@ -1527,7 +1527,7 @@ static void functionfs_unbind(struct ffs_data *ffs)
 static int ffs_epfiles_create(struct ffs_data *ffs)
 {
 	struct ffs_epfile *epfile, *epfiles;
-	unsigned i, count;
+	short i, count;
 
 	ENTER();
 
